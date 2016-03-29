@@ -70,6 +70,10 @@ type Env = Map Var Var
 newtype OptimizerM a = OptimizerM { runOptimizer :: ContT E (State Store) a }
     deriving (Functor, Applicative, Monad, MonadState Store, MonadCont)
 
+truthy :: Const -> Bool
+truthy (B False) = False
+truthy _         = True
+
 --------------------------------------------------------------------------------
 -- Store and store interactions
 
@@ -131,7 +135,7 @@ visit :: Operand -> Ctxt -> OptimizerM E
 visit (Opnd e rho loc) ctxt = lookupStore loc >>= \case
 
     Just (SE (Right _)) -> do
-        e' <- inline e ctxt rho loc
+        e' <- inline e ctxt rho
         updateStore loc (SE (Left e'))
         return e'
 
@@ -159,6 +163,21 @@ result e           = e
 --------------------------------------------------------------------------------
 -- Inliner
 
-inline :: E -> Ctxt -> Env -> Loc -> OptimizerM E
-inline = undefined
+inline :: E -> Ctxt -> Env -> OptimizerM E
 
+-- Constants
+inline e@(C c) ctxt env = return $ case ctxt of
+    Effect          -> C Void
+    Test | truthy c -> C (B True)
+    _               -> e
+
+-- Seq (Rebuilds using the Seq constructor, but should use smart seq from the paper)
+inline e@(Seq e1 e2) ctxt env = Seq <$> inline e1 ctxt env <*> inline e2 ctxt env
+
+inline e@(If e1 e2 e3) ctxt env = inline e1 Test env >>= \e1' -> case e1' of
+   C (B True)  -> Seq <$> pure e1' <*> inline e2 ctxt' env
+   C (B False) -> Seq <$> pure e1' <*> inline e3 ctxt' env
+   -- TODO: Handle case when e2' and e3' are equal
+   _           -> If  <$> pure e1' <*> inline e2 ctxt' env <*> inline e3 ctxt' env
+   where
+       ctxt' = case ctxt of { App _ _ _ -> Value ; _ -> ctxt }
