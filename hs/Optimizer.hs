@@ -91,7 +91,7 @@ lookupStore :: Loc -> OptimizerM (Maybe StoreEntry)
 lookupStore key = get >>= (\ sto -> return $ lookup key sto)
 
 updateStore :: Loc -> StoreEntry -> OptimizerM ()
-updateStore l entry = get >>= (\ sto -> put $ alter usH l sto)
+updateStore l entry = modify (alter usH l)
   where
     usH Nothing  = Just entry
     usH (Just x) =
@@ -105,11 +105,9 @@ updateStore l entry = get >>= (\ sto -> put $ alter usH l sto)
 -- Inliner Helpers (Figure 4)
 
 fold :: E -> Ctxt -> Env -> OptimizerM E
-fold (Primref p) (App op ctxt loc) env = do
-    e1 <- visit op Value
-    case result e1 of
-      C c -> updateStore loc (SC [Inlined]) >> return (C $ doop p c)
-      _   -> return e1
+fold (Primref p) (App op ctxt loc) env = fmap result (visit op Value) >>= \case
+    C c -> updateStore loc (SC [Inlined]) >> return (C $ doop p c)
+    e1  -> return e1
 
 -- For reference, I think the new code is equivalent to this in the new
 -- OptimizerM
