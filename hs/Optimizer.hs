@@ -180,4 +180,6 @@ inline e@(If e1 e2 e3) ctxt env = inline e1 Test env >>= \e1' -> case e1' of
    -- TODO: Handle case when e2' and e3' are equal
    _           -> If  <$> pure e1' <*> inline e2 ctxt' env <*> inline e3 ctxt' env
    where
-       ctxt' = case ctxt of { App _ _ _ -> Value ; _ -> ctxt }
+     ctxt' = case ctxt of { App{} -> Value ; _ -> ctxt }
+
+
