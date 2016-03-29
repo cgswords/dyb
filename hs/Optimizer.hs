@@ -9,7 +9,7 @@ import           Control.Monad.State
 import           Data.Either
 import           Data.List           hiding (lookup)
 import           Data.Map
-import           Prelude             hiding (lookup)
+import           Prelude             hiding (lookup, seq)
 
 type Opt a = ContT E (State Env) a
 
@@ -172,11 +172,11 @@ inline e@(C c) ctxt env = return $ case ctxt of
     _               -> e
 
 -- Seq (Rebuilds using the Seq constructor, but should use smart seq from the paper)
-inline e@(Seq e1 e2) ctxt env = Seq <$> inline e1 ctxt env <*> inline e2 ctxt env
+inline e@(Seq e1 e2) ctxt env = seq <$> inline e1 ctxt env <*> inline e2 ctxt env
 
 inline e@(If e1 e2 e3) ctxt env = inline e1 Test env >>= \e1' -> case e1' of
-   C (B True)  -> Seq <$> pure e1' <*> inline e2 ctxt' env
-   C (B False) -> Seq <$> pure e1' <*> inline e3 ctxt' env
+   C (B True)  -> seq <$> pure e1' <*> inline e2 ctxt' env
+   C (B False) -> seq <$> pure e1' <*> inline e3 ctxt' env
    -- TODO: Handle case when e2' and e3' are equal
    _           -> If  <$> pure e1' <*> inline e2 ctxt' env <*> inline e3 ctxt' env
    where
