@@ -1,12 +1,15 @@
-{-# LANGUAGE ConstraintKinds, FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 
-import Control.Monad
-import Control.Monad.State
-import Control.Monad.Cont
-import Data.Either
-import Data.List hiding (lookup)
-import Data.Map
-import Prelude hiding (lookup)
+import           Control.Monad
+import           Control.Monad.Cont
+import           Control.Monad.State
+import           Data.Either
+import           Data.List           hiding (lookup)
+import           Data.Map
+import           Prelude             hiding (lookup)
 
 type Opt a = ContT E (State Env) a
 
@@ -20,15 +23,15 @@ type Opt a = ContT E (State Env) a
 data Prim = Not
           | Add1
           | Sub1
-  deriving (Show, Eq)           
+  deriving (Show, Eq)
 
 data Const = N Int
            | Void
            | B Bool
-  deriving (Show, Eq)           
+  deriving (Show, Eq)
 
 -- Variables are strings.
-data E = C Const 
+data E = C Const
        | Ref String
        | Primref Prim
        | If E E E
@@ -37,58 +40,61 @@ data E = C Const
        | Lambda String E
        | Letrec [(String, E)] E
        | Call E E
-  deriving (Show, Eq)           
+  deriving (Show, Eq)
 
 data Operand = Opnd E Env Loc
-  deriving (Show)           
+  deriving (Show)
 
 instance (Eq Operand) where
-  (Opnd e rho loc) == (Opnd e' rho' loc') = 
+  (Opnd e rho loc) == (Opnd e' rho' loc') =
     e == e' && loc == loc'
 
-data Ctxt = Test 
-          | Effect 
-          | Value 
+data Ctxt = Test
+          | Effect
+          | Value
           | App Operand Ctxt Loc
-  deriving (Show, Eq)           
+  deriving (Show, Eq)
 
 data VarFlag = VRef
              | VAssign
-  deriving (Show, Eq)           
+  deriving (Show, Eq)
 
 data CtxtFlag = Inlined
-  deriving (Show, Eq)          
+  deriving (Show, Eq)
 
 data Var = Var String (Maybe Operand) [VarFlag] Loc
   deriving (Show, Eq)
 
 type Env = Map Var Var
 
+newtype OptimizerM a = OptimizerM { runOptimizer :: ContT E (State Store) a }
+    deriving (Functor, Applicative, Monad, MonadState Store, MonadCont)
+
 --------------------------------------------------------------------------------
 -- Store and store interactions
 
 -------------------------------------------------
--- The original algorithm calls for three stores; 
--- this is a headache in type land 
+-- The original algorithm calls for three stores;
+-- this is a headache in type land
 
 data StoreEntry = SV [VarFlag]
                 | SC [CtxtFlag]
-                | SE (Either E Unvisited)
+                | SE (Either E Unvisited) -- Maybe E instead of Either E Unvisited?
 
 data Unvisited = Unvisited
 
-type Loc = Int 
+type Loc = Int
 
 type Store = Map Loc StoreEntry
 
-lookupStore :: Loc -> State Store (Maybe StoreEntry)
+lookupStore :: Loc -> OptimizerM (Maybe StoreEntry)
 lookupStore key = get >>= (\ sto -> return $ lookup key sto)
 
-updateStore :: Loc -> StoreEntry -> State Store ()
+updateStore :: Loc -> StoreEntry -> OptimizerM ()
 updateStore l entry = get >>= (\ sto -> put $ alter usH l sto)
   where
     usH Nothing  = Just entry
-    usH (Just x) = 
+    usH (Just x) =
       case (x, entry) of
         (SV vs, SV vs') -> Just $ SV $ nub $ vs ++ vs'
         (SC cs, SC cs') -> Just $ SC $ nub $ cs ++ cs'
@@ -98,16 +104,23 @@ updateStore l entry = get >>= (\ sto -> put $ alter usH l sto)
 --------------------------------------------------------------------------------
 -- Inliner Helpers (Figure 4)
 
-fold :: E -> Ctxt -> Env -> ContT E (State Store) E
-fold (Primref p) (App op ctxt loc) env =
-  withContT k2 (visit op Value)
-    where
-      k2 k1 e1' = case result e1' of
-                    C c -> do updateStore loc $ SC [Inlined]
-                              k1 $ C (doop p c)
-                    _   -> k1 e1'
+fold :: E -> Ctxt -> Env -> OptimizerM E
+fold (Primref p) (App op ctxt loc) env = do
+    e1 <- visit op Value
+    case result e1 of
+      C c -> updateStore loc (SC [Inlined]) >> return (C $ doop p c)
+      _   -> return e1
 
-doop :: Prim -> Const -> Const 
+-- For reference, I think the new code is equivalent to this in the new
+-- OptimizerM
+{-fold (Primref p) (App op ctxt loc) env = withContT k2 (visit op Value)-}
+    {-where-}
+        {-k2 k1 e1' = case result e1' of-}
+                        {-C c -> do updateStore loc $ SC [Inlined]-}
+                                  {-k1 $ C (doop p c)-}
+                    {-_   -> k1 e1'-}
+
+doop :: Prim -> Const -> Const
 doop Not  (B b) = B (not b)
 doop Add1 (N n) = N $ n + 1
 doop Sub1 (N n) = N $ n - 1
@@ -116,14 +129,25 @@ doop p   c      = error $ "Invalid primop " ++ show p ++ " applied to constant "
 --------------------------------------------------------------------------------
 -- Inliner Helpers (Figure 4)
 
-visit :: Operand -> Ctxt -> ContT E (State Store) E
-visit (Opnd e rho loc) ctxt = 
-  do lookup <- lift $ lookupStore loc
-     case lookup of
-       Just (SE x) -> (flip . either) return x
-                        (\_ -> withContT k1 (inline e ctxt rho loc))
-                          where
-                            k1 k e' = updateStore loc (SE (Left e')) >> k e'
+visit :: Operand -> Ctxt -> OptimizerM E
+visit (Opnd e rho loc) ctxt = lookupStore loc >>= \case
+
+    Just (SE (Right _)) -> do
+        e' <- inline e ctxt rho loc
+        updateStore loc (SE (Left e'))
+        return e'
+
+    Just (SE (Left e')) -> return e'
+
+-- Original implementation for reference. I think these are equivalent
+{-visit :: Operand -> Ctxt -> OptimizerM E-}
+{-visit (Opnd e rho loc) ctxt = do-}
+    {-lookup <- lookupStore loc-}
+    {-case lookup of-}
+      {-Just (SE x) -> (flip . either) return x-}
+                       {-(\_ -> withContT k1 (inline e ctxt rho loc))-}
+                         {-where-}
+                           {-k1 k e' = updateStore loc (SE (Left e')) >> k e'-}
 
 seq :: E -> E -> E
 seq (C Void) e2 = e2
@@ -137,5 +161,6 @@ result e           = e
 --------------------------------------------------------------------------------
 -- Inliner
 
-inline :: E -> Ctxt -> Env -> Loc -> ContT E (State Store) E
+inline :: E -> Ctxt -> Env -> Loc -> OptimizerM E
 inline = undefined
+
