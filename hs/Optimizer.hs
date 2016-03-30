@@ -8,7 +8,7 @@ import           Control.Monad.Cont
 import           Control.Monad.State
 import           Data.Either
 import           Data.List           hiding (lookup)
-import           Data.Map
+import           Data.Map            hiding (fold)
 import           Prelude             hiding (lookup, seq)
 
 type Opt a = ContT E (State Env) a
@@ -45,9 +45,8 @@ data E = C Const
 data Operand = Opnd E Env Loc
   deriving (Show)
 
-instance (Eq Operand) where
-  (Opnd e rho loc) == (Opnd e' rho' loc') =
-    e == e' && loc == loc'
+instance Eq Operand where
+  Opnd e rho loc == Opnd e' rho' loc' = e == e' && loc == loc'
 
 data Ctxt = Test
           | Effect
@@ -74,6 +73,10 @@ truthy :: Const -> Bool
 truthy (B False) = False
 truthy _         = True
 
+true, false :: Const
+true  = B True
+false = B False
+
 --------------------------------------------------------------------------------
 -- Store and store interactions
 
@@ -89,13 +92,16 @@ data Unvisited = Unvisited
 
 type Loc = Int
 
-type Store = Map Loc StoreEntry
+data Store = Store
+    { locMap  :: Map Loc StoreEntry
+    , counter :: Int
+    }
 
 lookupStore :: Loc -> OptimizerM (Maybe StoreEntry)
-lookupStore key = get >>= (\ sto -> return $ lookup key sto)
+lookupStore key = get >>= (return . lookup key . locMap)
 
 updateStore :: Loc -> StoreEntry -> OptimizerM ()
-updateStore l entry = modify (alter usH l)
+updateStore l entry = modify (\st -> st { locMap = alter usH l (locMap st)})
   where
     usH Nothing  = Just entry
     usH (Just x) =
@@ -126,7 +132,7 @@ doop :: Prim -> Const -> Const
 doop Not  (B b) = B (not b)
 doop Add1 (N n) = N $ n + 1
 doop Sub1 (N n) = N $ n - 1
-doop p   c      = error $ "Invalid primop " ++ show p ++ " applied to constant " ++ show c
+doop p    c     = error $ "Invalid primop " ++ show p ++ " applied to constant " ++ show c
 
 --------------------------------------------------------------------------------
 -- Inliner Helpers (Figure 4)
@@ -152,8 +158,8 @@ visit (Opnd e rho loc) ctxt = lookupStore loc >>= \case
                            {-k1 k e' = updateStore loc (SE (Left e')) >> k e'-}
 
 seq :: E -> E -> E
-seq (C Void) e2 = e2
-seq e1 (Seq e3 e4) = (Seq (Seq e1 e3) e4)
+seq (C Void) e2    = e2
+seq e1 (Seq e2 e3) = Seq (Seq e1 e2) e3
 seq e1 e2          = Seq e1 e2
 
 result :: E -> E
@@ -175,11 +181,20 @@ inline e@(C c) ctxt env = return $ case ctxt of
 inline e@(Seq e1 e2) ctxt env = seq <$> inline e1 ctxt env <*> inline e2 ctxt env
 
 inline e@(If e1 e2 e3) ctxt env = inline e1 Test env >>= \e1' -> case e1' of
-   C (B True)  -> seq <$> pure e1' <*> inline e2 ctxt' env
-   C (B False) -> seq <$> pure e1' <*> inline e3 ctxt' env
-   -- TODO: Handle case when e2' and e3' are equal
-   _           -> If  <$> pure e1' <*> inline e2 ctxt' env <*> inline e3 ctxt' env
-   where
-     ctxt' = case ctxt of { App{} -> Value ; _ -> ctxt }
+    C (B True)  -> seq e1'  <$> inline e2 ctxt' env
+    C (B False) -> seq e1'  <$> inline e3 ctxt' env
+    _           -> make e1' <$> inline e2 ctxt' env <*> inline e3 ctxt' env
+    where
+      ctxt' = case ctxt of { App{} -> Value ; _ -> ctxt }
+      make e1' e2'@(C _) e3' | e2' == e3' = seq e1' e2'
+      make e1' e2'       e3'              = If e1' e2' e3'
+
+inline e@(Lambda x e1) ctxt env =
+    case ctxt of
+      Test            -> return $ C true
+      Effect          -> return $ C Void
+      App op env' loc -> fold e ctxt env
+      Value           -> undefined
+
 
 
