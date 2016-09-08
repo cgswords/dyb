@@ -14,7 +14,6 @@ data FunDecl = FunDecl
   , body   :: Expr
   }
 
-
 data Op = Plus | Times | Minus
 
 data Expr
@@ -146,6 +145,8 @@ boolExpr (And _ _) = True
 boolExpr (Or _ _)  = True
 boolExpr (Not _)   = True
 
+
+--- Location map (strings -> locations), 'break label'
 cg :: Expr -> Env -> DataDest -> ControlDest -> [Code]
 cg (Seq e1 e2)   env ddest cdest   = let l = mkLabel "seq"
                                      in cg e1 env effect (Jump l) ++
@@ -202,11 +203,7 @@ unravelArgs n env (e:es) = let lbl = mkLabel $ "l" ++ (show n) ++  "_"
                               unravelArgs (n-1) env es
 
 cgBranch :: (String -> Code) -> String -> (String -> Code) -> String -> [Code]
-cgBranch jmp1 l1 jmp2 l2 =
-  if l2 == "return" -- or l2 is lnext and l1 /= "return"
-  then [jmp1 l1, cgJump l2]
-  else [jmp2 l2, cgJump l1]
-
+cgBranch jmp1 l1 jmp2 l2 = [jmp1 l1, jmp2 l2]
 
 cgControl :: ControlDest -> [Code]
 cgControl (Jump l)       = [cgJump l]
@@ -219,7 +216,6 @@ cgStore (OperLoc Stack) (DestLoc Stack) control = cgControl control
 cgStore (OperLoc Stack) (DestLoc a) control     = [Pop (allocLoc a)] ++ cgControl control
 cgStore op (DestLoc Stack) control              = [Push (opLoc op)] ++ cgControl control
 cgStore op (DestLoc a) control                  = [Mov (opLoc op) (allocLoc a)] ++ cgControl control
-
 
 fngen :: FunDecl -> [Code]
 fngen (FunDecl { name, params, locals, body }) = 
@@ -237,6 +233,8 @@ emit :: [Code] -> String
 emit [] = ""
 emit (Lbl l:rest) = l ++ ":\n" ++ emit rest
 emit (code:rest)  = "    " ++ show code ++ "\n" ++ emit rest
+
+output = putStrLn . emit . fngen
 
 ------------------------------------------------------------------
 -- Tests
@@ -268,9 +266,9 @@ test2 =
   FunDecl { name = "ortest"
           , params = ["x","y"]
           , locals = []
-          , body = If (Or x y)
+          , body = If (And x y)
                       (Return (IntV 5)) 
-                      (If (And x y) 
+                      (If (Or x y) 
                           (Return (IntV 10)) 
                           (Call "ortest" [IntV 0, VarV "y"]))
           }
