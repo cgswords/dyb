@@ -14,7 +14,7 @@ pub struct Expander {
 }
 
 impl Expander {
-    pub fn new(mut defns: BTreeMap<Ident, Macro>) -> Expander {
+    pub fn new(defns: BTreeMap<Ident, Macro>) -> Expander {
         let mut expander = Expander {
             defns: BTreeMap::new(),
             next_mark: 0,
@@ -83,7 +83,7 @@ impl Expander {
             Exp::If(test, conseq, alt) => {
                 OE::If(self.bexpand(test), self.bexpand(conseq), self.bexpand(alt))
             }
-            Exp::Lambda(lambda) => {
+            Exp::Lambda(_lambda) => {
                 panic!()
             }
             Exp::Loop(body) => OutExp::Loop(self.bexpand(body)),

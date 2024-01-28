@@ -58,6 +58,7 @@ pub fn assign(lhs: Ident, rhs: Exp) -> SequenceItem {
     SequenceItem::Assign(lhs, Box::new(rhs))
 }
 
+#[allow(unused)]
 pub fn assign_in(lhs: Ident, rhs: Exp, body: Exp) -> Exp {
     match body {
         Exp::Block(mut s) => {

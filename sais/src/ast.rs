@@ -1,9 +1,9 @@
 use std::{
     collections::BTreeSet,
-    fmt::{Debug, Display},
+    fmt::Debug,
 };
 
-use pretty::{Doc, RcDoc};
+use pretty::RcDoc;
 
 // ******************************************* //
 // INPUT LANGUAGE                              //
@@ -33,6 +33,7 @@ pub struct Fun {
     pub body: Exp,
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum Defn {
     Fn(Fun),
@@ -57,6 +58,7 @@ pub struct Ident {
     marks: BTreeSet<Mark>,
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub enum Binop {
     Add,
@@ -267,7 +269,7 @@ impl ToDoc for Exp {
                     .append(comma_list(args)),
             )
             .append(")"),
-            Exp::Call(fun, args) | Exp::MacroCall(fun, args) => RcDoc::group(
+            Exp::MacroCall(fun, args) => RcDoc::group(
                 RcDoc::group(fun.to_doc().append(RcDoc::text("!")))
                     .append(RcDoc::text("("))
                     .append(comma_list(args)),
