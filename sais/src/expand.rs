@@ -59,7 +59,9 @@ impl Expander {
     }
 
     pub fn expand(&mut self, e: Exp) -> OutExp {
-        if PRINT_ALL_EXPANSIONS { println!("expanding: {}", e.to_doc_string()); }
+        if PRINT_ALL_EXPANSIONS {
+            println!("expanding: {}", e.to_doc_string());
+        }
         use OutExp as OE;
         let result = match e {
             Exp::Ident(x) => OE::Var(x.resolve()),
@@ -71,7 +73,9 @@ impl Expander {
             Exp::MacroCall(fun, args) => {
                 let macro_body = self.defns.get(&fun.resolve()).unwrap();
                 let exp = self.apply_macro(macro_body.clone(), args);
-                if PRINT_MACRO_EXPANSIONS { println!("expanded: {}", exp.to_doc_string()); }
+                if PRINT_MACRO_EXPANSIONS {
+                    println!("expanded: {}", exp.to_doc_string());
+                }
                 self.expand(exp)
             }
             Exp::Block(entries) => OE::Block(self.sexpand(entries)),
@@ -176,8 +180,8 @@ impl Expander {
                 }
             }
             l @ Exp::Lit(_) => l,
-            // We expand lambdas immediately. This is because, if we didn't, we would need to 
-            // add a new expansion form `ApplyLamdda` or similar 
+            // We expand lambdas immediately. This is because, if we didn't, we would need to
+            // add a new expansion form `ApplyLamdda` or similar
             Exp::Call(i, args) => {
                 let args = args
                     .into_iter()
@@ -339,7 +343,9 @@ impl Syntax for Exp {
             Exp::Ident(i) => Exp::Ident(i.subst(ident, var)),
             l @ Exp::Lit(_) => l,
             Exp::Call(fun, args) => Exp::Call(fun.subst(ident, var), subst_all(args, ident, var)),
-            Exp::MacroCall(fun, args) => Exp::MacroCall(fun.subst(ident, var), subst_all(args, ident, var)),
+            Exp::MacroCall(fun, args) => {
+                Exp::MacroCall(fun.subst(ident, var), subst_all(args, ident, var))
+            }
             Exp::Block(seq) => Exp::Block(subst_all(seq, ident, var)),
             Exp::Binop(lhs, op, rhs) => {
                 Exp::Binop(lhs.subst(ident, var), op, rhs.subst(ident, var))
